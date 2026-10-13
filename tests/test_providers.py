@@ -1,5 +1,11 @@
 from customosint.models import Entity, EntityType
-from customosint.providers.public import GitHubProvider, GravatarProvider, SpiderFootProvider
+from customosint.providers.public import (
+    GitHubProvider,
+    GravatarProvider,
+    SpiderFootProvider,
+    _spiderfoot_scan_id,
+    _spiderfoot_status,
+)
 
 
 def test_github_normalization():
@@ -20,3 +26,9 @@ def test_spiderfoot_normalization_is_low_confidence():
     seed = Entity(EntityType.EMAIL, "a@example.com", "a@example.com")
     result = SpiderFootProvider().normalize([{"type": "INTERNET_NAME", "data": "example.com"}], seed)
     assert result.entities[0].confidence == .45
+
+
+def test_spiderfoot_lifecycle_parsing():
+    assert _spiderfoot_scan_id(["SUCCESS", "scan-1"]) == "scan-1"
+    assert _spiderfoot_scan_id({"scan_id": "scan-2"}) == "scan-2"
+    assert _spiderfoot_status([["scan-1", "name", "target", None, None, None, "FINISHED"]], "scan-1") == "FINISHED"

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -109,10 +110,25 @@ class SpiderFootProvider(Provider):
         return (True, "ready") if os.getenv("SPIDERFOOT_URL") else (False, "SPIDERFOOT_URL missing; start the local SpiderFoot server")
     async def run(self, entity: Entity, raw_dir: Path, timeout: float) -> ProviderResult:
         base = os.environ["SPIDERFOOT_URL"].rstrip("/")
-        payload = urlencode({"scanname": f"customosint-{entity.id[:8]}", "scantarget": entity.value, "modulelist": "all"}).encode()
+        payload = urlencode({"scanname": f"customosint-{entity.id[:8]}", "scantarget": entity.value, "modulelist": "", "typelist": "", "usecase": "investigate"}).encode()
         _, raw = await _request_json(f"{base}/startscan", {"User-Agent": "CustomOSINT/0.1", "Content-Type": "application/x-www-form-urlencoded"}, timeout, payload)
         raw_dir.mkdir(parents=True, exist_ok=True); (raw_dir / "start.json").write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-        return ProviderResult(raw=raw, status="STARTED", error="Scan started; export it from SpiderFoot after completion")
+        scan_id = _spiderfoot_scan_id(raw)
+        if not scan_id:
+            return ProviderResult(raw=raw, status="ERROR", error="SpiderFoot did not return a scan id")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            _, scans = await _request_json(f"{base}/scanlist", {"User-Agent": "CustomOSINT/0.1"}, min(10, timeout))
+            status = _spiderfoot_status(scans, scan_id)
+            if status in {"FINISHED", "ABORTED", "ERROR"}:
+                if status != "FINISHED":
+                    return ProviderResult(raw=scans, status="ERROR", error=f"SpiderFoot scan ended as {status}")
+                export_payload = urlencode({"ids": scan_id}).encode()
+                _, exported = await _request_json(f"{base}/scanexportjsonmulti", {"User-Agent": "CustomOSINT/0.1", "Content-Type": "application/x-www-form-urlencoded"}, min(30, timeout), export_payload)
+                (raw_dir / "result.json").write_text(json.dumps(exported, ensure_ascii=False, indent=2), encoding="utf-8")
+                return self.normalize(exported, entity)
+            await asyncio.sleep(2)
+        raise TimeoutError("SpiderFoot scan did not finish within provider timeout")
     def normalize(self, raw: Any, entity: Entity) -> ProviderResult:
         entities: list[Entity] = []
         for row in raw if isinstance(raw, list) else []:
@@ -120,3 +136,21 @@ class SpiderFootProvider(Provider):
             mapping = {"EMAILADDR": EntityType.EMAIL, "INTERNET_NAME": EntityType.DOMAIN, "IP_ADDRESS": EntityType.IP_ADDRESS, "SOCIAL_MEDIA": EntityType.SOCIAL_PROFILE}
             if value and kind in mapping: entities.append(Entity(mapping[kind], str(value), str(value).casefold(), [self.name], .45, {"spiderfoot_type": kind}, entity.depth + 1))
         return ProviderResult(entities=entities, raw=raw)
+
+
+def _spiderfoot_scan_id(raw: Any) -> str | None:
+    if isinstance(raw, (list, tuple)) and len(raw) > 1 and str(raw[0]).upper() == "SUCCESS":
+        return str(raw[1])
+    if isinstance(raw, dict):
+        value = raw.get("id") or raw.get("scan_id")
+        return str(value) if value else None
+    return None
+
+
+def _spiderfoot_status(raw: Any, scan_id: str) -> str | None:
+    for row in raw if isinstance(raw, list) else []:
+        if isinstance(row, list) and len(row) > 6 and str(row[0]) == scan_id:
+            return str(row[6]).upper()
+        if isinstance(row, dict) and str(row.get("id")) == scan_id:
+            return str(row.get("status", "")).upper()
+    return None
