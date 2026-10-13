@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import sys
 from pathlib import Path
 
@@ -15,5 +16,9 @@ def checks() -> list[tuple[str, str, str]]:
     for label, variable in (("HIBP API", "HIBP_API_KEY"), ("GitHub API", "GITHUB_TOKEN")):
         result.append((label, "READY" if os.getenv(variable) else "NO API KEY", variable))
     writable = os.access(Path.cwd(), os.W_OK); result.append(("Filesystem", "READY" if writable else "ERROR", str(Path.cwd())))
+    try:
+        with socket.create_connection(("github.com", 443), timeout=3):
+            result.append(("Network", "READY", "github.com:443"))
+    except OSError as exc:
+        result.append(("Network", "WARN", f"github.com:443 unavailable: {exc}"))
     return result
-

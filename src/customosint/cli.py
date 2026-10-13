@@ -21,7 +21,7 @@ app = typer.Typer(no_args_is_help=True, help="Evidence-first OSINT correlation t
 
 
 @app.command()
-def investigate(email: Annotated[list[str] | None, typer.Option()] = None, nickname: Annotated[list[str] | None, typer.Option()] = None, name: Annotated[list[str] | None, typer.Option()] = None, phone: Annotated[list[str] | None, typer.Option()] = None, image: Annotated[list[Path] | None, typer.Option()] = None, depth: Annotated[int, typer.Option(min=0, max=5)] = 2, providers: Annotated[str | None, typer.Option(help="Comma-separated provider names")] = None, case_name: Annotated[str | None, typer.Option()] = None, fixture: Annotated[Path | None, typer.Option(exists=True, file_okay=False)] = None, aggressive: Annotated[bool, typer.Option()] = False, no_cache: Annotated[bool, typer.Option()] = False, max_entities: Annotated[int | None, typer.Option(min=1)] = None, max_provider_runs: Annotated[int | None, typer.Option(min=1)] = None, timeout: Annotated[float | None, typer.Option(min=1)] = None, provider_timeout: Annotated[float | None, typer.Option(min=1)] = None, config: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None) -> None:
+def investigate(email: Annotated[list[str] | None, typer.Option()] = None, nickname: Annotated[list[str] | None, typer.Option()] = None, name: Annotated[list[str] | None, typer.Option()] = None, phone: Annotated[list[str] | None, typer.Option()] = None, image: Annotated[list[Path] | None, typer.Option()] = None, depth: Annotated[int, typer.Option(min=0, max=5)] = 2, providers: Annotated[str | None, typer.Option(help="Comma-separated provider names")] = None, case_name: Annotated[str | None, typer.Option()] = None, fixture: Annotated[Path | None, typer.Option(exists=True, file_okay=False)] = None, aggressive: Annotated[bool, typer.Option()] = False, no_cache: Annotated[bool, typer.Option()] = False, max_entities: Annotated[int | None, typer.Option(min=1)] = None, max_provider_runs: Annotated[int | None, typer.Option(min=1)] = None, timeout: Annotated[float | None, typer.Option(min=1)] = None, provider_timeout: Annotated[float | None, typer.Option(min=1)] = None, verbose: Annotated[int, typer.Option("-v", count=True)] = 0, debug: Annotated[bool, typer.Option()] = False, config: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None) -> None:
     """Create a case and run controlled enrichment."""
     seed_values: list[tuple[str, str]] = []
     for kind, values in (("email", email), ("nickname", nickname), ("name", name), ("phone", phone)):
@@ -29,6 +29,8 @@ def investigate(email: Annotated[list[str] | None, typer.Option()] = None, nickn
     seed_values.extend(("image", str(value)) for value in image or [])
     if not seed_values: raise typer.BadParameter("Provide at least one seed")
     settings = load_settings(config); label = case_name or seed_values[0][1]
+    if debug: verbose = max(verbose, 3)
+    if verbose: typer.echo(f"[+] Investigation: {label} (verbosity={verbose})")
     if max_entities is not None: settings.max_entities = max_entities
     if max_provider_runs is not None: settings.max_provider_runs = max_provider_runs
     if timeout is not None: settings.timeout = timeout
