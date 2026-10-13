@@ -1,0 +1,26 @@
+general:
+  cases_dir: cases
+  default_depth: 2
+  minimum_pivot_confidence: 0.40
+  max_entities: 500
+  max_provider_runs: 200
+  timeout: 900
+  provider_timeout: 120
+  concurrency: 3
+  cache_ttl: 3600
+  retries: 2
+  retry_base_delay: 1.0
+  per_provider_delay: 0.5
+providers:
+  maigret: {enabled: true}
+  sherlock: {enabled: true}
+  holehe: {enabled: true}
+  exiftool: {enabled: true}
+  hibp: {enabled: true, api_key_env: HIBP_API_KEY}
+  github: {enabled: true, api_key_env: GITHUB_TOKEN}
+  gravatar: {enabled: true, api_key_env: GRAVATAR_API_KEY}
+  keybase: {enabled: true}
+  ghunt: {enabled: false, experimental: true}
+  spiderfoot: {enabled: false, base_url_env: SPIDERFOOT_URL, experimental: true}
+graph: {gexf: true, graphml: true, neo4j: true, maltego: true}
+report: {html: true, interactive_graph: true}
