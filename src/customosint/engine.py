@@ -86,10 +86,13 @@ class InvestigationEngine:
         raw_dir.mkdir(parents=True, exist_ok=True)
         raw_file = raw_dir / "normalized-input.json"
         raw_file.write_text(json.dumps(result.raw, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        self.case.db.add_raw_result(run_id, raw_file)
         self.case.db.finish_provider_run(run_id, result.status, str(raw_file.relative_to(self.case.path)), result.error)
         id_map: dict[str, str] = {}
         for found in result.entities:
             old_id = found.id; stored, created = self.case.db.upsert_entity(found); id_map[old_id] = stored.id
+            if stored.type == EntityType.IMAGE:
+                self.case.db.upsert_image(stored)
             threshold = 0.0 if aggressive else self.settings.minimum_pivot_confidence
             if created and stored.depth <= max_depth and stored.confidence >= threshold and len(self.case.db.entities()) < self.settings.max_entities: self.queue.append(stored)
         for relation in result.relationships:
@@ -121,5 +124,9 @@ class InvestigationEngine:
 
     def _write_normalized(self) -> None:
         normalized = self.case.path / "normalized"
-        for name, rows in (("entities.jsonl", self.case.db.entities()), ("relationships.jsonl", self.case.db.relationships())):
+        for name, rows in (
+            ("entities.jsonl", self.case.db.entities()),
+            ("relationships.jsonl", self.case.db.relationships()),
+            ("evidence.jsonl", self.case.db.evidence()),
+        ):
             (normalized / name).write_text("\n".join(json.dumps(row.to_dict(), ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")

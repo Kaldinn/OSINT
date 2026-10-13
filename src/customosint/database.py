@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any
 
-from .models import Entity, EntityType, Relationship, utc_now
+from .models import Entity, EntityType, Evidence, Relationship, utc_now
 
 SCHEMA = """
 PRAGMA foreign_keys=ON;
@@ -86,6 +87,33 @@ class CaseDatabase:
     def finish_provider_run(self, run_id: int, status: str, raw_path: str | None = None, error: str | None = None, return_code: int | None = None) -> None:
         self.connection.execute("UPDATE provider_runs SET finished_at=?,status=?,raw_output_file=?,error=?,return_code=? WHERE id=?", (utc_now(), status, raw_path, error, return_code, run_id)); self.connection.commit()
 
+    def add_raw_result(self, run_id: int, path: Path) -> None:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.connection.execute(
+            "INSERT INTO raw_results(provider_run_id,path,sha256,created_at) VALUES(?,?,?,?)",
+            (run_id, str(path), digest, utc_now()),
+        )
+        self.connection.commit()
+
+    def upsert_image(self, entity: Entity) -> None:
+        metadata = entity.metadata
+        if not metadata.get("sha256") or not metadata.get("md5"):
+            return
+        self.connection.execute(
+            "INSERT OR REPLACE INTO images VALUES(?,?,?,?,?,?,?,?)",
+            (
+                entity.id,
+                entity.id,
+                entity.value,
+                metadata["sha256"],
+                metadata["md5"],
+                metadata.get("phash"),
+                metadata.get("dhash"),
+                json.dumps(metadata, ensure_ascii=False, default=str),
+            ),
+        )
+        self.connection.commit()
+
     def entities(self) -> list[Entity]:
         rows = self.connection.execute("SELECT * FROM entities ORDER BY depth,type,normalized_value").fetchall()
         return [Entity(id=r["id"], type=EntityType(r["type"]), value=r["value"], normalized_value=r["normalized_value"], sources=json.loads(r["sources"]), confidence=r["confidence"], metadata=json.loads(r["metadata"]), created_at=r["created_at"], depth=r["depth"]) for r in rows]
@@ -93,8 +121,38 @@ class CaseDatabase:
     def relationships(self) -> list[Relationship]:
         result: list[Relationship] = []
         for r in self.connection.execute("SELECT * FROM relationships ORDER BY confidence DESC"):
-            result.append(Relationship(id=r["id"], source=r["source"], target=r["target"], relation=r["relation"], confidence=r["confidence"], providers=json.loads(r["providers"]), created_at=r["created_at"]))
+            evidence_rows = self.connection.execute(
+                "SELECT * FROM evidence WHERE relationship_id=? ORDER BY created_at",
+                (r["id"],),
+            ).fetchall()
+            evidence = [
+                Evidence(
+                    id=item["id"],
+                    kind=item["kind"],
+                    description=item["description"],
+                    weight=item["weight"],
+                    provider=item["provider"],
+                    metadata=json.loads(item["metadata"]),
+                    created_at=item["created_at"],
+                )
+                for item in evidence_rows
+            ]
+            result.append(Relationship(id=r["id"], source=r["source"], target=r["target"], relation=r["relation"], confidence=r["confidence"], evidence=evidence, providers=json.loads(r["providers"]), created_at=r["created_at"]))
         return result
+
+    def evidence(self) -> list[Evidence]:
+        return [
+            Evidence(
+                id=row["id"],
+                kind=row["kind"],
+                description=row["description"],
+                weight=row["weight"],
+                provider=row["provider"],
+                metadata={**json.loads(row["metadata"]), "relationship_id": row["relationship_id"]},
+                created_at=row["created_at"],
+            )
+            for row in self.connection.execute("SELECT * FROM evidence ORDER BY created_at")
+        ]
 
     def provider_runs(self) -> list[dict[str, Any]]:
         return [dict(row) for row in self.connection.execute("SELECT * FROM provider_runs ORDER BY id")]

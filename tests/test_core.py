@@ -59,3 +59,14 @@ def test_cache_ttl(tmp_path: Path):
     assert db.get_cache("provider", "input", 60) == {"ok": True}
     assert db.get_cache("provider", "input", -1) is None
     db.close()
+
+
+def test_relationship_evidence_round_trip(tmp_path: Path):
+    db = CaseDatabase(tmp_path / "case.db")
+    source, _ = db.upsert_entity(Entity(EntityType.USERNAME, "alice", "alice"))
+    target, _ = db.upsert_entity(Entity(EntityType.URL, "https://x.test", "https://x.test/"))
+    evidence = Evidence("direct_profile_link", "direct link", .9, "fixture")
+    db.upsert_relationship(Relationship(source.id, target.id, "LINKS_TO", .9, [evidence], ["fixture"]))
+    assert db.relationships()[0].evidence[0].description == "direct link"
+    assert db.evidence()[0].metadata["relationship_id"] == db.relationships()[0].id
+    db.close()

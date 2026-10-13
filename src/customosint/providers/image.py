@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..models import Entity, EntityType, ProviderResult
+from ..models import Entity, EntityType, Evidence, ProviderResult, Relationship
 from .base import Provider
 
 
@@ -35,5 +35,15 @@ class ImageProvider(Provider):
     def normalize(self, raw: Any, entity: Entity) -> ProviderResult:
         entity.metadata.update(raw if isinstance(raw, dict) else {}); entity.sources.append(self.name); entity.confidence = 1.0
         hashes = [Entity(EntityType.IMAGE_HASH, str(raw[key]), str(raw[key]), [self.name], 1.0, {"algorithm": key}, entity.depth + 1) for key in ("sha256", "md5", "phash", "dhash") if isinstance(raw, dict) and raw.get(key)]
-        return ProviderResult(hashes, raw=raw)
-
+        relationships = [
+            Relationship(
+                entity.id,
+                item.id,
+                "HAS_IMAGE_HASH",
+                1.0,
+                [Evidence("cryptographic_hash" if item.metadata["algorithm"] == "sha256" else "image_hash", f"Computed {item.metadata['algorithm']} for local image", 1.0, self.name)],
+                [self.name],
+            )
+            for item in hashes
+        ]
+        return ProviderResult([entity, *hashes], relationships, raw)
