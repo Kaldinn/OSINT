@@ -27,6 +27,13 @@ class TimeoutProvider(FakeProvider):
         await asyncio.sleep(.1); return ProviderResult()
 
 
+class FailureProvider(FakeProvider):
+    name = "failure"
+
+    async def run(self, entity, raw_dir, timeout):
+        raise RuntimeError("fixture failure")
+
+
 def test_pivot_depth_and_max_entities(tmp_path: Path):
     case = Case.create(tmp_path, "depth", [])
     engine = InvestigationEngine(case, Settings(max_entities=3, provider_timeout=1), [FakeProvider()])
@@ -43,3 +50,13 @@ def test_missing_and_timeout_are_recorded(tmp_path: Path):
     assert statuses == {"missing": "SKIPPED", "timeout": "TIMEOUT"}
     case.db.close()
 
+
+def test_provider_failure_and_run_limit(tmp_path: Path):
+    case = Case.create(tmp_path, "failure", [])
+    engine = InvestigationEngine(case, Settings(max_provider_runs=1), [FailureProvider(), FakeProvider()])
+    engine.add_seed("nickname", "abc")
+    asyncio.run(engine.run(depth=1))
+    runs = case.db.provider_runs()
+    assert len(runs) <= 2
+    assert any(run["status"] == "ERROR" and "fixture failure" in run["error"] for run in runs)
+    case.db.close()
