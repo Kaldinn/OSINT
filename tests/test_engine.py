@@ -57,6 +57,16 @@ def test_provider_failure_and_run_limit(tmp_path: Path):
     engine.add_seed("nickname", "abc")
     asyncio.run(engine.run(depth=1))
     runs = case.db.provider_runs()
-    assert len(runs) <= 2
+    assert len(runs) == 1
     assert any(run["status"] == "ERROR" and "fixture failure" in run["error"] for run in runs)
+    case.db.close()
+
+
+def test_disabled_provider_is_not_run_unless_explicit(tmp_path: Path):
+    settings = Settings(providers={"fake": {"enabled": False}})
+    case = Case.create(tmp_path, "disabled", [])
+    engine = InvestigationEngine(case, settings, [FakeProvider()])
+    engine.add_seed("nickname", "abc")
+    asyncio.run(engine.run(depth=1))
+    assert case.db.provider_runs() == []
     case.db.close()

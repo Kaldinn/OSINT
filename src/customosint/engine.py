@@ -54,7 +54,18 @@ class InvestigationEngine:
         while self.queue and len(self.case.db.entities()) < self.settings.max_entities and self.provider_runs < self.settings.max_provider_runs:
             current = self.queue.popleft()
             if current.depth > 0 and current.depth >= depth: continue
-            candidates = [p for p in self.providers if current.type.value in p.supported_entities and (not selected or p.name in selected)]
+            candidates = [
+                provider
+                for provider in self.providers
+                if current.type.value in provider.supported_entities
+                and (not selected or provider.name in selected)
+                and (
+                    (selected is not None and provider.name in selected)
+                    or self.settings.providers.get(provider.name, {}).get("enabled", True)
+                )
+            ]
+            remaining_runs = self.settings.max_provider_runs - self.provider_runs
+            candidates = candidates[: max(0, remaining_runs)]
             async def invoke(provider: Provider, subject: Entity = current) -> None:
                 async with semaphore: await self._invoke(provider, subject, depth, aggressive)
             await asyncio.gather(*(invoke(provider) for provider in candidates))
@@ -93,6 +104,8 @@ class InvestigationEngine:
         self.case.db.finish_provider_run(run_id, result.status, str(raw_file.relative_to(self.case.path)), result.error)
         id_map: dict[str, str] = {}
         for found in result.entities:
+            if len(self.case.db.entities()) >= self.settings.max_entities:
+                break
             old_id = found.id; stored, created = self.case.db.upsert_entity(found); id_map[old_id] = stored.id
             if stored.type == EntityType.IMAGE:
                 self.case.db.upsert_image(stored)
