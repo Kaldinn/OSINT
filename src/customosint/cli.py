@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -30,6 +31,8 @@ def investigate(email: Annotated[list[str] | None, typer.Option()] = None, nickn
     if not seed_values: raise typer.BadParameter("Provide at least one seed")
     settings = load_settings(config); label = case_name or seed_values[0][1]
     if debug: verbose = max(verbose, 3)
+    level = logging.DEBUG if verbose >= 2 else logging.INFO if verbose == 1 else logging.WARNING
+    logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
     if verbose: typer.echo(f"[+] Investigation: {label} (verbosity={verbose})")
     if max_entities is not None: settings.max_entities = max_entities
     if max_provider_runs is not None: settings.max_provider_runs = max_provider_runs

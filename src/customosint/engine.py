@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections import deque
 from collections.abc import Iterable
 from pathlib import Path
@@ -15,6 +16,8 @@ from .models import Entity, EntityType, Evidence, ProviderResult, Relationship
 from .normalization import derive_usernames, normalize_email, normalize_phone, normalize_username
 from .providers import Provider, built_in_providers
 from .providers.image import ImageProvider
+
+LOGGER = logging.getLogger("customosint.engine")
 
 
 class InvestigationEngine:
@@ -53,6 +56,7 @@ class InvestigationEngine:
         semaphore = asyncio.Semaphore(self.settings.concurrency)
         while self.queue and len(self.case.db.entities()) < self.settings.max_entities and self.provider_runs < self.settings.max_provider_runs:
             current = self.queue.popleft()
+            LOGGER.debug("Processing %s:%s at depth %s", current.type.value, current.normalized_value, current.depth)
             if current.depth > 0 and current.depth >= depth: continue
             candidates = [
                 provider
@@ -75,9 +79,11 @@ class InvestigationEngine:
 
     async def _invoke(self, provider: Provider, entity: Entity, max_depth: int, aggressive: bool) -> None:
         self.provider_runs += 1; run_id = self.case.db.start_provider_run(provider.name, entity.normalized_value)
+        LOGGER.info("Running %s for %s", provider.name, entity.normalized_value)
         if self.fixture is None:
             available, reason = provider.available()
             if not available:
+                LOGGER.warning("Skipping %s: %s", provider.name, reason)
                 self.case.db.finish_provider_run(run_id, "SKIPPED", error=reason); return
         raw_dir = self.case.path / "raw" / provider.name / f"{self.provider_runs:04d}"
         try:
@@ -94,14 +100,17 @@ class InvestigationEngine:
                     if result.status == "SUCCESS" and result.raw is not None:
                         self.case.db.set_cache(provider.name, entity.normalized_value, result.raw)
         except TimeoutError:
+            LOGGER.warning("Provider %s timed out", provider.name)
             self.case.db.finish_provider_run(run_id, "TIMEOUT", error="provider timeout"); return
         except Exception as exc:
+            LOGGER.exception("Provider %s failed", provider.name)
             self.case.db.finish_provider_run(run_id, "ERROR", error=f"{type(exc).__name__}: {exc}"); return
         raw_dir.mkdir(parents=True, exist_ok=True)
         raw_file = raw_dir / "normalized-input.json"
         raw_file.write_text(json.dumps(result.raw, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         self.case.db.add_raw_result(run_id, raw_file)
         self.case.db.finish_provider_run(run_id, result.status, str(raw_file.relative_to(self.case.path)), result.error)
+        LOGGER.info("%s finished as %s with %d entities", provider.name, result.status, len(result.entities))
         id_map: dict[str, str] = {}
         for found in result.entities:
             if len(self.case.db.entities()) >= self.settings.max_entities:
