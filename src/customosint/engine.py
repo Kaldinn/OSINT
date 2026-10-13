@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .case import Case
 from .config import Settings
+from .correlation import correlate_images, correlate_profiles
 from .models import Entity, EntityType, Evidence, ProviderResult, Relationship
 from .normalization import derive_usernames, normalize_email, normalize_phone, normalize_username
 from .providers import Provider, built_in_providers
@@ -57,6 +58,8 @@ class InvestigationEngine:
             async def invoke(provider: Provider, subject: Entity = current) -> None:
                 async with semaphore: await self._invoke(provider, subject, depth, aggressive)
             await asyncio.gather(*(invoke(provider) for provider in candidates))
+        correlate_profiles(self.case.db)
+        correlate_images(self.case.db)
         self._write_normalized()
 
     async def _invoke(self, provider: Provider, entity: Entity, max_depth: int, aggressive: bool) -> None:
